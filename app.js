@@ -2024,11 +2024,9 @@ async function publishRolePayloads(round) {
     payload: rolePayloads[player.id] || { key: "player", label: "Spieler", message: "Du hast keine geheime Info." },
   }));
 
-  // Use UPSERT instead of DELETE+INSERT for atomic operation
-  // This avoids race conditions and duplicate key errors
-  const { error } = await supabaseClient
-    .from("player_rounds")
-    .upsert(rows, { onConflict: "lobby_code,player_id,round_id" });
+  const { error } = await supabaseClient.rpc("publish_player_rounds", {
+    round_rows: rows,
+  });
 
   if (error) {
     // Debug: Prüfe, ob game_state Zeile mit der game_state mit korrektem host_id existiert
@@ -2042,7 +2040,10 @@ async function publishRolePayloads(round) {
       ? `game_state existiert (host_id="${gameState.host_id}", dein currentPlayerId="${state.currentPlayerId}", state.hostId="${state.hostId}")`
       : `game_state existiert NICHT für lobby_code="${state.lobbyCode}"`;
     
-    const fullError = `Rollen konnten nicht verteilt werden (${error.code || "Supabase"}): ${error.message}. [Debug: ${debugInfo}]`;
+    const migrationHint = error.code === "42501" || error.code === "42883"
+      ? " Bitte supabase/fix-player-rounds-rls.sql einmal im Supabase SQL-Editor ausführen."
+      : "";
+    const fullError = `Rollen konnten nicht verteilt werden (${error.code || "Supabase"}): ${error.message}.${migrationHint} [Debug: ${debugInfo}]`;
     console.error(fullError);
     throw new Error(fullError);
   }
