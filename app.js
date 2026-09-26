@@ -829,7 +829,7 @@ function bindEvents() {
       return;
     }
 
-    const leaveBtn = event.target.closest("#leave-lobby-btn");
+    const leaveBtn = event.target.closest("#leave-lobby-btn, #leave-game-btn");
     if (leaveBtn) {
       event.preventDefault();
       event.stopPropagation();
@@ -928,6 +928,7 @@ async function handleStartGame() {
     console.log("Publishing role payloads...");
     // Publish roles to Supabase
     await publishRolePayloads(state.round);
+    render();
     console.log("Game started successfully!");
   } catch (error) {
     console.error("handleStartGame() error:", error);
@@ -994,6 +995,7 @@ async function handleNewRound() {
     
     // Publish roles to Supabase
     await publishRolePayloads(state.round);
+    render();
   } catch (error) {
     showStatus(error.message);
     render();
@@ -1236,10 +1238,21 @@ function render() {
 }
 
 function renderScreens() {
-  // Runde wurde vom Host gestartet: auch Mitspieler weiterschalten, egal ob
-  // dies über Realtime oder nur über das Poll-Fallback bekannt wurde.
-  if (state.currentScreen === "lobby" && state.roundIdFromServer) {
+  const activeRoundId = state.roundIdFromServer;
+  const hasFreshPayload = Boolean(state.rolePayload) && (!state.syncedRoundId || state.syncedRoundId === activeRoundId);
+
+  // Host started or restarted a round: everyone without a matching payload waits on
+  // role-loading, whether they came from the lobby or from a previous round's game screen.
+  if (activeRoundId && !hasFreshPayload && state.currentScreen !== "role-loading") {
+    state.rolePayload = null;
     navigateToScreen("role-loading", "forward");
+    return;
+  }
+
+  // Host ended the game or reset the lobby: bring everyone but the host (who already
+  // navigated itself) back to the lobby.
+  if (!activeRoundId && !state.isHost && (state.currentScreen === "game" || state.currentScreen === "role-loading")) {
+    navigateToScreen("lobby", "backward");
     return;
   }
 
@@ -1253,8 +1266,8 @@ function renderScreens() {
     activeScreen.setAttribute("data-direction", state.screenDirection);
   }
   
-  // Auto-navigate to game when role-loading and rolePayload arrives
-  if (state.currentScreen === "role-loading" && state.rolePayload) {
+  // Auto-navigate to game once the payload for the current round has arrived.
+  if (state.currentScreen === "role-loading" && hasFreshPayload) {
     setTimeout(() => {
       navigateToScreen("game", "forward");
     }, 300);
@@ -1504,10 +1517,13 @@ function renderRoundSummary() {
   const status = document.getElementById("round-status");
   const summary = document.getElementById("round-summary");
   const hostGameControls = document.getElementById("host-game-controls");
-  
+
+  // state.round only exists locally for the host; every player relies on
+  // roundIdFromServer to know whether a round is actually live.
+  const roundActive = Boolean(state.roundIdFromServer);
+
   if (hostGameControls) {
-    // Show host game controls on game screen if this is a round
-    hostGameControls.classList.toggle("hidden", !state.isHost || !state.round);
+    hostGameControls.classList.toggle("hidden", !state.isHost || !roundActive);
   }
   
   if (!status || !summary) return; // Elements don't exist on this screen
@@ -1518,7 +1534,7 @@ function renderRoundSummary() {
     return;
   }
 
-  if (!state.round) {
+  if (!roundActive) {
     status.textContent = "Noch keine Runde gestartet.";
     summary.innerHTML = "";
     return;
