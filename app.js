@@ -1923,6 +1923,10 @@ function subscribeToLobby() {
     })
     .subscribe();
 
+  // Sofort einmal abrufen statt bis zu 3s auf den ersten Intervall-Tick zu warten.
+  refreshLobbyPlayers();
+  refreshGameState();
+
   state.lobbyPollTimer = setInterval(() => {
     refreshLobbyPlayers();
     refreshGameState();
@@ -2082,7 +2086,7 @@ async function publishRolePayloads(round) {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=15").catch((error) => {
+    navigator.serviceWorker.register("./sw.js?v=16").catch((error) => {
       console.warn("Service worker registration failed:", error);
     });
   });
