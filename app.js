@@ -1236,6 +1236,13 @@ function render() {
 }
 
 function renderScreens() {
+  // Runde wurde vom Host gestartet: auch Mitspieler weiterschalten, egal ob
+  // dies über Realtime oder nur über das Poll-Fallback bekannt wurde.
+  if (state.currentScreen === "lobby" && state.roundIdFromServer) {
+    navigateToScreen("role-loading", "forward");
+    return;
+  }
+
   document.querySelectorAll(".screen").forEach(screen => {
     screen.removeAttribute("data-active");
   });
