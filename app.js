@@ -1900,9 +1900,10 @@ function subscribeToLobby() {
         if (state.currentScreen === "lobby") {
           navigateToScreen("role-loading", "forward");
         }
-        if (!state.rolePayload) loadOwnRolePayload(row.round_id);
+        if (!state.rolePayload || state.syncedRoundId !== row.round_id) loadOwnRolePayload(row.round_id);
       } else if (!state.round) {
         state.rolePayload = null;
+        state.syncedRoundId = null;
       }
       render();
     })
@@ -1912,6 +1913,7 @@ function subscribeToLobby() {
     .on("postgres_changes", { event: "*", schema: "public", table: "player_rounds", filter: `player_id=eq.${state.currentPlayerId}` }, (payload) => {
       if (!payload.new || !payload.new.payload) return;
       state.rolePayload = payload.new.payload;
+      state.syncedRoundId = payload.new.round_id || state.roundIdFromServer;
       render();
     })
     .on("postgres_changes", { event: "INSERT", schema: "public", table: "lobby_messages", filter: `lobby_code=eq.${state.lobbyCode}` }, (payload) => {
@@ -1946,10 +1948,13 @@ async function refreshGameState() {
   state.hostId = data.host_id || state.hostId;
   state.isHost = state.hostId === state.currentPlayerId;
   const roundId = data.round_id || null;
-  if (roundId && roundId !== state.roundIdFromServer && !state.rolePayload) {
+  // Der Host publiziert die Rollen erst NACH dem Schreiben von round_id, daher kann
+  // die erste Abfrage hier noch leer sein - so lange weiter versuchen, bis sie passt.
+  if (roundId && (!state.rolePayload || state.syncedRoundId !== roundId)) {
     await loadOwnRolePayload(roundId);
   } else if (!roundId && !state.round) {
     state.rolePayload = null;
+    state.syncedRoundId = null;
   }
   state.roundIdFromServer = roundId;
   render();
@@ -1973,11 +1978,11 @@ async function loadOwnRolePayload(roundId) {
     state.rolePayload = data.payload;
     state.syncedRoundId = roundId;
     render();
-  } else {
-    // If role not found but roundId exists, clear roundId (game likely ended)
-    state.roundIdFromServer = null;
-    state.rolePayload = null;
   }
+  // Noch keine Zeile gefunden: der Host hat round_id bereits gesetzt, aber die
+  // Rollen-RPC läuft noch. Nur das Poll-Fallback/Realtime auf player_rounds
+  // versucht es erneut - game_state.round_id bleibt die einzige Quelle dafür,
+  // ob die Runde tatsächlich beendet wurde.
 }
 
 async function loadLatestDetectiveMessage() {
