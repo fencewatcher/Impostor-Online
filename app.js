@@ -911,7 +911,7 @@ async function handleStartGame() {
     saveRound();
     
     console.log("Syncing to Supabase...");
-    // Sync to Supabase to notify other players
+    // Sync to Supabase to notify other players (publishes roles internally)
     const synced = await syncToSupabase();
     console.log("Sync result:", synced);
     if (!synced) {
@@ -923,11 +923,6 @@ async function handleStartGame() {
     console.log("Navigating to role-loading screen...");
     // Navigate to role-loading screen
     navigateToScreen("role-loading", "forward");
-    render();
-    
-    console.log("Publishing role payloads...");
-    // Publish roles to Supabase
-    await publishRolePayloads(state.round);
     render();
     console.log("Game started successfully!");
   } catch (error) {
@@ -946,6 +941,7 @@ async function handleResetLobby() {
   state.detectiveMessage = "";
   state.roundIdFromServer = null;
   saveRound();
+  await syncToSupabase();
   navigateToScreen("lobby", "forward");
   render();
 }
@@ -961,6 +957,7 @@ async function handleEndGame() {
   state.roundIdFromServer = null;
   state.statusMessage = "Spiel beendet.";
   saveRound();
+  await syncToSupabase();
   navigateToScreen("lobby", "backward");
   render();
 }
@@ -981,7 +978,7 @@ async function handleNewRound() {
     state.round = createGameRound(state.players, state.settings, roleCounts);
     saveRound();
     
-    // Sync to Supabase to notify other players
+    // Sync to Supabase to notify other players (publishes roles internally)
     const synced = await syncToSupabase();
     if (!synced) {
       showStatus("Fehler beim Speichern der neuen Runde.");
@@ -991,10 +988,6 @@ async function handleNewRound() {
     
     // Navigate to role-loading screen
     navigateToScreen("role-loading", "forward");
-    render();
-    
-    // Publish roles to Supabase
-    await publishRolePayloads(state.round);
     render();
   } catch (error) {
     showStatus(error.message);
@@ -1213,7 +1206,6 @@ function saveRound() {
     localStorage.removeItem(STORAGE_KEYS.round);
   }
   persistSharedState();
-  syncToSupabase();
 }
 
 function persistSharedState() {
@@ -1241,9 +1233,20 @@ function renderScreens() {
   const activeRoundId = state.roundIdFromServer;
   const hasFreshPayload = Boolean(state.rolePayload) && (!state.syncedRoundId || state.syncedRoundId === activeRoundId);
 
-  // Host started or restarted a round: everyone without a matching payload waits on
-  // role-loading, whether they came from the lobby or from a previous round's game screen.
-  if (activeRoundId && !hasFreshPayload && state.currentScreen !== "role-loading") {
+  // Round started: if still on lobby, navigate to role-loading or directly to game
+  // if the payload was already loaded (e.g. by polling before the subscription).
+  if (activeRoundId && state.currentScreen === "lobby") {
+    if (hasFreshPayload) {
+      navigateToScreen("game", "forward");
+    } else {
+      state.rolePayload = null;
+      navigateToScreen("role-loading", "forward");
+    }
+    return;
+  }
+
+  // New round while already on game screen: wait on role-loading for fresh payload
+  if (activeRoundId && state.currentScreen === "game" && !hasFreshPayload) {
     state.rolePayload = null;
     navigateToScreen("role-loading", "forward");
     return;
