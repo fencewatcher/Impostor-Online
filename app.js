@@ -1589,7 +1589,7 @@ function getPlayerRoleInfo(playerId, round) {
     return {
       key: "detective",
       label: "Detektiv",
-      message: [sharedRoleText, `Gesuchtes Wort: ${round.word}`, `Deine Items:\n- ${items.join("\n- ") || "Keine Items"}`].filter(Boolean).join("\n"),
+      message: [sharedRoleText, `Gesuchtes Wort: ${round.word}`, `Item-Pool (wie viele du nutzt, entscheidet die Gruppe):\n- ${items.join("\n- ") || "Keine Items"}`].filter(Boolean).join("\n"),
     };
   }
 
@@ -1609,18 +1609,28 @@ function getPlayerRoleInfo(playerId, round) {
 }
 
 function getSharedRoleText(round, players = state.players, settings = state.settings) {
-  const detectiveNames = getNamesForIds(round.detectives);
-  const availableItems = detectiveItems.filter((item) => item.minPlayers <= players.length);
-  const itemList = availableItems.map((item) => `${item.name}: ${item.description}`).join("\n- ") || "Keine Items";
-  const jesterText = round.jesters.length > 0 ? `Jester: ${round.jesters.length} dabei` : "";
+  const parts = [`Impostoren: ${round.impostors.length}`];
 
-  return [
-    `Impostoren: ${round.impostors.length}`,
-    jesterText,
-    `Detektiv${round.detectives.length === 1 ? "" : "en"}: ${detectiveNames}`,
-    round.detectives.length ? `Detektiv-Items zur Auswahl (nutzbar: ${settings.itemsPerDetective} pro Detektiv):\n- ${itemList}` : "",
-    `Doppelgänger dabei: ${round.doppelgangers.length > 0 ? "Ja" : "Nein"}`,
-  ].filter(Boolean).join("\n");
+  if (round.jesters.length > 0) {
+    parts.push(`Jester: ${round.jesters.length} dabei`);
+  }
+
+  if (round.detectives.length > 0) {
+    const detectiveNames = getNamesForIds(round.detectives);
+    parts.push(`Detektiv${round.detectives.length === 1 ? "" : "en"}: ${detectiveNames}`);
+    // Items-Pool: aus allen möglichen Items werden itemsPerDetective zufällig ausgewählt,
+    // aus denen der Detektiv sich bedienen kann (wie viele er nutzt, entscheidet die Gruppe).
+    const poolItems = (round.detectiveItemsPool || []).map((item) => `${item.name}: ${item.description}`).join("\n- ");
+    if (poolItems) {
+      parts.push(`Detektiv-Item-Pool (${settings.itemsPerDetective} Items):\n- ${poolItems}`);
+    }
+  }
+
+  if (round.doppelgangers.length > 0) {
+    parts.push(`Doppelgänger dabei: Ja`);
+  }
+
+  return parts.join("\n");
 }
 
 function buildRolePayloads(round, players, settings) {
@@ -1648,7 +1658,7 @@ function buildRolePayloads(round, players, settings) {
     result[id] = {
       key: "detective",
       label: "Detektiv",
-      message: [sharedRoleText, `Gesuchtes Wort: ${round.word}`, `Deine Items:\n- ${items.join("\n- ") || "Keine Items"}`].filter(Boolean).join("\n"),
+      message: [sharedRoleText, `Gesuchtes Wort: ${round.word}`, `Item-Pool (wie viele du nutzt, entscheidet die Gruppe):\n- ${items.join("\n- ") || "Keine Items"}`].filter(Boolean).join("\n"),
     };
   });
 
@@ -1714,10 +1724,14 @@ function createGameRound(players, settings, roleCounts) {
     impostorClues[impostorId] = clueText;
   });
 
+  // Shared item pool: all detectives see the same pool of itemsPerDetective randomly selected items.
+  // How many items a detective actually uses is decided by the group.
   const detectiveItemsMap = {};
   const availableItems = detectiveItems.filter((item) => item.minPlayers <= players.length);
+  const poolSize = Math.min(settings.itemsPerDetective, availableItems.length);
+  const detectiveItemsPool = shuffle([...availableItems]).slice(0, poolSize);
   detectives.forEach((playerId) => {
-    detectiveItemsMap[playerId] = shuffle([...availableItems]).slice(0, settings.itemsPerDetective).map((item) => `${item.name}: ${item.description}`);
+    detectiveItemsMap[playerId] = detectiveItemsPool.map((item) => `${item.name}: ${item.description}`);
   });
 
   return {
@@ -1730,6 +1744,7 @@ function createGameRound(players, settings, roleCounts) {
     detectives,
     doppelgangers,
     detectiveItemsMap,
+    detectiveItemsPool,
     detectiveMessage: "",
     createdAt: Date.now(),
   };
