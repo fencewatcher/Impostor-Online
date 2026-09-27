@@ -515,26 +515,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     localStorage.removeItem(STORAGE_KEYS.round);
   }
   
-  // On page reload: remove player from old lobby and clear lobby state
-  if (supabaseReady && state.lobbyCode) {
-    try {
-      await supabaseClient
-        .from("lobby_players")
-        .delete()
-        .eq("lobby_code", state.lobbyCode)
-        .eq("player_id", state.currentPlayerId);
-    } catch (error) {
-      console.warn("Could not remove player from lobby on reload:", error);
-    }
-    state.lobbyCode = null;
-    state.players = [];
-    state.hostId = null;
-    state.isHost = false;
-    state.roundIdFromServer = null;
-    state.rolePayload = null;
-    localStorage.removeItem(STORAGE_KEYS.shared);
-  }
-  
+  // Try to rejoin lobby on reload instead of deleting the player.
+  // The player only leaves via the explicit "Leave Lobby" button.
   if (supabaseReady && state.lobbyCode) {
     try {
       const lobby = await loadLobby(state.lobbyCode);
@@ -547,19 +529,56 @@ document.addEventListener("DOMContentLoaded", async () => {
         state.roundIdFromServer = lobby.roundId;
         if (lobby.roundId) await loadOwnRolePayload(lobby.roundId);
         await loadLatestDetectiveMessage();
-        subscribeToLobby();
-        
-        // Navigate to appropriate screen - only if round is still active
-        if (state.round && state.roundIdFromServer && state.rolePayload) {
-          state.currentScreen = "game";
-        } else if (state.round && state.roundIdFromServer) {
-          state.currentScreen = "role-loading";
-        } else {
-          state.currentScreen = "lobby";
+        // Ensure we're still in lobby_players (re-insert on reload)
+        try {
+          await supabaseClient
+            .from("lobby_players")
+            .upsert({
+              lobby_code: state.lobbyCode,
+              player_id: state.currentPlayerId,
+              name: state.players.find(p => p.id === state.currentPlayerId)?.name || "Spieler",
+            }, { onConflict: "lobby_code,player_id" });
+        } catch (e) {
+          console.warn("Could not re-join lobby on reload:", e);
+          state.lobbyCode = null;
+          state.players = [];
+          state.hostId = null;
+          state.isHost = false;
+          state.roundIdFromServer = null;
+          state.rolePayload = null;
+          localStorage.removeItem(STORAGE_KEYS.shared);
         }
+        if (state.lobbyCode) {
+          subscribeToLobby();
+          
+          // Navigate to appropriate screen
+          if (state.roundIdFromServer && state.rolePayload) {
+            state.currentScreen = "game";
+          } else if (state.roundIdFromServer) {
+            state.currentScreen = "role-loading";
+          } else {
+            state.currentScreen = "lobby";
+          }
+        }
+      } else {
+        // Lobby no longer exists
+        state.lobbyCode = null;
+        state.players = [];
+        state.hostId = null;
+        state.isHost = false;
+        state.roundIdFromServer = null;
+        state.rolePayload = null;
+        localStorage.removeItem(STORAGE_KEYS.shared);
       }
     } catch (error) {
-      showStatus(error.message);
+      console.warn("Could not restore lobby on reload:", error.message);
+      state.lobbyCode = null;
+      state.players = [];
+      state.hostId = null;
+      state.isHost = false;
+      state.roundIdFromServer = null;
+      state.rolePayload = null;
+      localStorage.removeItem(STORAGE_KEYS.shared);
     }
   }
   render();
@@ -2089,7 +2108,7 @@ async function publishRolePayloads(round) {
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js?v=16").catch((error) => {
+    navigator.serviceWorker.register("./sw.js").catch((error) => {
       console.warn("Service worker registration failed:", error);
     });
   });
